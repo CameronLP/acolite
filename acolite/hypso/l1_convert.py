@@ -135,8 +135,8 @@ def l1_convert(inputfile, output = None, settings = None):
 
 
         ## time
-        if 'unixtime' in f['/navigation/']:
-            utime = f['/navigation/']['unixtime'][:]
+        if 'unixtime' in f['/geometry/']:
+            utime = f['/geometry/']['unixtime'][:]
             start_time = datetime.datetime.utcfromtimestamp(utime[0])
             stop_time = datetime.datetime.utcfromtimestamp(utime[-1])
             dt = start_time + (stop_time-start_time)
@@ -144,8 +144,8 @@ def l1_convert(inputfile, output = None, settings = None):
             dt = dateutil.parser.parse(gatts['timestamp_acquired'].strip('Z')) ## timestamp format is wrong, has both +00:00 and Z
 
         ## read lat and lon
-        lat = f['/navigation/']['latitude'][:]
-        lon = f['/navigation/']['longitude'][:]
+        lat = f['/geometry/']['latitude'][:]
+        lon = f['/geometry/']['longitude'][:]
 
         sub = None
         if setu['limit'] is not None:
@@ -158,15 +158,15 @@ def l1_convert(inputfile, output = None, settings = None):
 
         ## geometry
         if sub is None:
-            vza = f['/navigation/']['sensor_zenith'][:]
-            vaa = f['/navigation/']['sensor_azimuth'][:]
-            sza = f['/navigation/']['solar_zenith'][:]
-            saa = f['/navigation/']['solar_azimuth'][:]
+            vza = f['/geometry/']['sensor_zenith'][:]
+            vaa = f['/geometry/']['sensor_azimuth'][:]
+            sza = f['/geometry/']['solar_zenith'][:]
+            saa = f['/geometry/']['solar_azimuth'][:]
         else:
-            vza = f['/navigation/']['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            vaa = f['/navigation/']['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            sza = f['/navigation/']['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            saa = f['/navigation/']['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vza = f['/geometry/']['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vaa = f['/geometry/']['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            sza = f['/geometry/']['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            saa = f['/geometry/']['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
         ## compute relative azimuth angle
         raa = np.abs(saa-vaa)
