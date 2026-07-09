@@ -135,7 +135,7 @@ def l1_convert(inputfile, output = None, settings = None):
             ## output name
             oname = '{}_{}'.format(gatts['sensor'], dt.strftime('%Y_%m_%d_%H_%M_%S'))
             if setu['region_name'] != '': oname+='_{}'.format(setu['region_name'])
-            ofile = '{}/{}_{}.nc'.format(output, oname, gatts['acolite_file_type'])
+            ofile = '{}/{}_{}'.format(output, oname, gatts['acolite_file_type'])
             ofile += '_{:.1f}km.nc'.format(ssd)
             gatts['oname'] = oname
             gatts['ofile'] = ofile
