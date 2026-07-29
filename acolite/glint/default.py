@@ -63,6 +63,9 @@ def default(gem, settings = None, lutdw = None, write = True, new_file = False):
     ## get aerosol information, currently only fixed
     aot = gem.gatts['ac_aot_550']
     model = gem.gatts['ac_model']
+    if model.endswith('-MOD1'): model = 'C'
+    if model.endswith('-MOD2'): model = 'M'
+    if model.endswith('-MOD3'): model = 'U'
 
     if 'aot_550' in gem.datasets:
         print('Per-pixel aot found, not yet implemented.')
