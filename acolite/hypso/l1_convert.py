@@ -49,6 +49,16 @@ def l1_convert(inputfile, output = None, settings = None):
             print('HYPSO processing of sensor {} not configured'.format(gatts['instrument']))
             continue
 
+        if gatts['processing_level'] == 'L1C':
+            processing_level = 'L1C'
+        elif gatts['processing_level'] == 'L1D':
+            processing_level = 'L1D'
+            setu['output_lt'] = False
+        else:
+            print('HYPSO processing of product level {} not configured'.format(gatts['processing_level']))
+            continue
+
+
         ## get sensor specific defaults
         setd = ac.acolite.settings.parse(sensor)
         ## set sensor default if user has not specified the setting
@@ -62,21 +72,49 @@ def l1_convert(inputfile, output = None, settings = None):
         f = h5py.File(bundle, mode='r')
 
         ## get band information
-        if 'Lt' in f['/products']:
-            lt_pars = 'Lt'
-            attributes = {k: f['/products']['Lt'].attrs[k] for k in f['/products']['Lt'].attrs.keys() if k != 'DIMENSION_LIST'}
-            waves = attributes['wavelengths']
-            fwhm = attributes['fwhm']
+        if processing_level == 'L1C':
+
+            ## get band information - TOA radiance
+            if 'Lt' in f['/products']:
+                lt_pars = 'Lt'
+                attributes = {k: f['/products']['Lt'].attrs[k] for k in f['/products']['Lt'].attrs.keys() if k != 'DIMENSION_LIST'}
+                waves = attributes['wavelengths']
+                fwhm = attributes['fwhm']
+            else:
+                lt_pars = []
+                waves = []
+                fwhm = []
+                for ds in f['/products']:
+                    if ds.startswith('Lt_'):
+                        lt_pars.append(ds)
+                        att = {k: f['/products'][ds].attrs[k] for k in f['/products'][ds].attrs.keys() if k != 'DIMENSION_LIST'}
+                        waves.append(att['wavelength'][0])
+                        fwhm.append(att['fwhm'][0])
+
+
+        elif processing_level == 'L1D':
+
+
+            ## get band information - TOA reflectance
+            if 'rhot' in f['/products']:
+                lt_pars = 'rhot'
+                attributes = {k: f['/products']['rhot'].attrs[k] for k in f['/products']['rhot'].attrs.keys() if k != 'DIMENSION_LIST'}
+                waves = attributes['wavelengths']
+                fwhm = attributes['fwhm']
+            else:
+                lt_pars = []
+                waves = []
+                fwhm = []
+                for ds in f['/products']:
+                    if ds.startswith('rhot_'):
+                        lt_pars.append(ds)
+                        att = {k: f['/products'][ds].attrs[k] for k in f['/products'][ds].attrs.keys() if k != 'DIMENSION_LIST'}
+                        waves.append(att['wavelength'][0])
+                        fwhm.append(att['fwhm'][0])
+
         else:
-            lt_pars = []
-            waves = []
-            fwhm = []
-            for ds in f['/products']:
-                if ds.startswith('Lt_'):
-                    lt_pars.append(ds)
-                    att = {k: f['/products'][ds].attrs[k] for k in f['/products'][ds].attrs.keys() if k != 'DIMENSION_LIST'}
-                    waves.append(att['wavelength'][0])
-                    fwhm.append(att['fwhm'][0])
+            continue
+
 
         rsr = ac.shared.rsr_hyper(waves, fwhm, step=0.1)
         rsrd = ac.shared.rsr_dict(rsrd={sensor:{'rsr':rsr}})
@@ -93,9 +131,12 @@ def l1_convert(inputfile, output = None, settings = None):
                            'wave_name':swave, 'width': fwhm[bi],
                            'rsr': rsr[bi],'f0': f0d[bi]}
 
+
+
+
         ## time
-        if 'unixtime' in f['/navigation/']:
-            utime = f['/navigation/']['unixtime'][:]
+        if 'unixtime' in f['/geometry/']:
+            utime = f['/geometry/']['unixtime'][:]
             start_time = datetime.datetime.utcfromtimestamp(utime[0])
             stop_time = datetime.datetime.utcfromtimestamp(utime[-1])
             dt = start_time + (stop_time-start_time)
@@ -103,8 +144,8 @@ def l1_convert(inputfile, output = None, settings = None):
             dt = dateutil.parser.parse(gatts['timestamp_acquired'].strip('Z')) ## timestamp format is wrong, has both +00:00 and Z
 
         ## read lat and lon
-        lat = f['/navigation/']['latitude'][:]
-        lon = f['/navigation/']['longitude'][:]
+        lat = f['/geometry/']['latitude'][:]
+        lon = f['/geometry/']['longitude'][:]
 
         sub = None
         if setu['limit'] is not None:
@@ -117,15 +158,15 @@ def l1_convert(inputfile, output = None, settings = None):
 
         ## geometry
         if sub is None:
-            vza = f['/navigation/']['sensor_zenith'][:]
-            vaa = f['/navigation/']['sensor_azimuth'][:]
-            sza = f['/navigation/']['solar_zenith'][:]
-            saa = f['/navigation/']['solar_azimuth'][:]
+            vza = f['/geometry/']['sensor_zenith'][:]
+            vaa = f['/geometry/']['sensor_azimuth'][:]
+            sza = f['/geometry/']['solar_zenith'][:]
+            saa = f['/geometry/']['solar_azimuth'][:]
         else:
-            vza = f['/navigation/']['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            vaa = f['/navigation/']['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            sza = f['/navigation/']['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            saa = f['/navigation/']['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vza = f['/geometry/']['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vaa = f['/geometry/']['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            sza = f['/geometry/']['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            saa = f['/geometry/']['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
         ## compute relative azimuth angle
         raa = np.abs(saa-vaa)
@@ -216,47 +257,94 @@ def l1_convert(inputfile, output = None, settings = None):
         sza = None
 
         ## read data cube
-        if (lt_pars == 'Lt') & (setu['hyper_read_cube']):
-            if sub is None:
-                data = f['/products']['Lt'][:]
-            else:
-                data= f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
-            nbands = data.shape[2]
-            data_dimensions = data.shape[0], data.shape[1]
+
+        if processing_level == 'L1C':
+            if (lt_pars == 'Lt') & (setu['hyper_read_cube']):
+                if sub is None:
+                    data = f['/products']['Lt'][:]
+                else:
+                    data= f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
+                nbands = data.shape[2]
+                data_dimensions = data.shape[0], data.shape[1]
+
+        elif processing_level == 'L1D':
+            if (lt_pars == 'rhot') & (setu['hyper_read_cube']):
+                if sub is None:
+                    data = f['/products']['rhot'][:]
+                else:
+                    data= f['/products']['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
+                nbands = data.shape[2]
+                data_dimensions = data.shape[0], data.shape[1]
+        else:
+            continue
 
         ## run through bands and store rhot
         for bi, b in enumerate(bands):
             ## get dataset attributes
             ds_att = {k:bands[b][k] for k in bands[b] if k not in ['rsr']}
 
-            ## copy radiance
-            if (lt_pars == 'Lt'):
-                if (setu['hyper_read_cube']):
-                    cdata_radiance = data[:,:,bi]
+
+            if processing_level == 'L1C':
+
+                var_name = "rhot"
+
+                ## copy radiance
+                if (lt_pars == 'Lt'):
+                    if (setu['hyper_read_cube']):
+                        cdata_radiance = data[:,:,bi]
+                    else:
+                        if sub is None:
+                            cdata_radiance = f['/products']['Lt'][:, :, bi]
+                        else:
+                            cdata_radiance = f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
                 else:
                     if sub is None:
-                        cdata_radiance = f['/products']['Lt'][:, :, bi]
+                        cdata_radiance = f['/products'][lt_pars[bi]][:]
                     else:
-                        cdata_radiance = f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
-            else:
-                if sub is None:
-                    cdata_radiance = f['/products'][lt_pars[bi]][:]
+                        cdata_radiance = f['/products'][lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+
+                if setu['output_lt']:
+                    ## write toa radiance
+                    gemo.write('Lt_{}'.format(bands[b]['wave_name']), cdata_radiance, ds_att = ds_att)
+                    print('Wrote Lt_{}'.format(bands[b]['wave_name']))
+
+                ## compute reflectance
+                cdata = cdata_radiance * (np.pi * d * d) / (bands[b]['f0'] * cossza)
+                cdata_radiance = None
+
+            elif processing_level == 'L1D':
+
+                var_name = "rhot"
+
+                ## copy reflectance
+                if (lt_pars == 'rhot'):
+                    if (setu['hyper_read_cube']):
+                        cdata_reflectance = data[:,:,bi]
+                    else:
+                        if sub is None:
+                            cdata_reflectance = f['/products']['rhot'][:, :, bi]
+                        else:
+                            cdata_reflectance = f['/products']['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
                 else:
-                    cdata_radiance = f['/products'][lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+                    if sub is None:
+                        cdata_reflectance = f['/products'][lt_pars[bi]][:]
+                    else:
+                        cdata_reflectance = f['/products'][lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
-            if setu['output_lt']:
-                ## write toa radiance
-                gemo.write('Lt_{}'.format(bands[b]['wave_name']), cdata_radiance, ds_att = ds_att)
-                print('Wrote Lt_{}'.format(bands[b]['wave_name']))
+                ## compute reflectance
+                cdata = cdata_reflectance
+                cdata_reflectance = None
 
-            ## compute reflectance
-            cdata = cdata_radiance * (np.pi * d * d) / (bands[b]['f0'] * cossza)
-            cdata_radiance = None
 
             ## write toa reflectance
-            gemo.write('rhot_{}'.format(bands[b]['wave_name']), cdata, ds_att = ds_att)
+            #gemo.write('rhot_{}'.format(bands[b]['wave_name']), cdata, ds_att = ds_att)
+            #cdata = None
+            #print('Wrote rhot_{}'.format(bands[b]['wave_name']))
+
+            gemo.write(f"{var_name}_{bands[b]['wave_name']}", cdata, ds_att = ds_att)
             cdata = None
-            print('Wrote rhot_{}'.format(bands[b]['wave_name']))
+            print(f"Wrote {var_name}_{bands[b]['wave_name']}")
+
         data = None
 
         ## close file
