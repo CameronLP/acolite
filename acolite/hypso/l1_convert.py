@@ -8,6 +8,25 @@
 ##                2025-02-04 (QV) improved settings handling
 ##                2025-02-10 (QV) cleaned up settings use, output naming
 ##                2025-03-10 (QV) added HYPSO-2 support, added subsetting
+##                2026-08-26 transparently support hypso-package's current flat NetCDF
+##                layout (products/geometry variables at the file root instead of
+##                separate groups - see hypso-package's REFACTOR_PROGRESS.md /
+##                ARCHITECTURE_PROPOSAL.md) alongside the original grouped layout,
+##                since hypso-processing-pipeline hasn't migrated onto that writer
+##                yet and both are live in practice
+
+def _hypso_products_and_geometry_groups(f):
+    """Returns (products, geometry): h5py group-like objects to read HYPSO
+    band/geolocation data from, for either NetCDF layout hypso-package has
+    delivered - a real, separate `/products`/`/geometry` group (the original
+    layout) or the file root itself (the current layout, where those
+    variables live alongside `metadata/*` with no separate group at all).
+    Detected by presence of a top-level `products` group - the current
+    layout never has one."""
+    if 'products' in f and hasattr(f['products'], 'keys'):
+        return f['products'], f['/geometry/']
+    return f, f
+
 
 def l1_convert(inputfile, output = None, settings = None):
     import numpy as np
@@ -70,47 +89,46 @@ def l1_convert(inputfile, output = None, settings = None):
         f0 = ac.shared.f0_get(f0_dataset=setu['solar_irradiance_reference'])
 
         f = h5py.File(bundle, mode='r')
+        products, geometry = _hypso_products_and_geometry_groups(f)
 
         ## get band information
         if processing_level == 'L1C':
 
             ## get band information - TOA radiance
-            if 'Lt' in f['/products']:
+            if 'Lt' in products:
                 lt_pars = 'Lt'
-                attributes = {k: f['/products']['Lt'].attrs[k] for k in f['/products']['Lt'].attrs.keys() if k != 'DIMENSION_LIST'}
+                attributes = {k: products['Lt'].attrs[k] for k in products['Lt'].attrs.keys() if k != 'DIMENSION_LIST'}
                 waves = attributes['wavelengths']
                 fwhm = attributes['fwhm']
             else:
-                lt_pars = []
+                lt_pars = sorted((ds for ds in products if ds.startswith('Lt_')),
+                                  key=lambda ds: int(np.asarray(products[ds].attrs['band']).reshape(-1)[0]))
                 waves = []
                 fwhm = []
-                for ds in f['/products']:
-                    if ds.startswith('Lt_'):
-                        lt_pars.append(ds)
-                        att = {k: f['/products'][ds].attrs[k] for k in f['/products'][ds].attrs.keys() if k != 'DIMENSION_LIST'}
-                        waves.append(att['wavelength'][0])
-                        fwhm.append(att['fwhm'][0])
+                for ds in lt_pars:
+                    att = {k: products[ds].attrs[k] for k in products[ds].attrs.keys() if k != 'DIMENSION_LIST'}
+                    waves.append(att['wavelength'][0])
+                    fwhm.append(att['fwhm'][0])
 
 
         elif processing_level == 'L1D':
 
 
             ## get band information - TOA reflectance
-            if 'rhot' in f['/products']:
+            if 'rhot' in products:
                 lt_pars = 'rhot'
-                attributes = {k: f['/products']['rhot'].attrs[k] for k in f['/products']['rhot'].attrs.keys() if k != 'DIMENSION_LIST'}
+                attributes = {k: products['rhot'].attrs[k] for k in products['rhot'].attrs.keys() if k != 'DIMENSION_LIST'}
                 waves = attributes['wavelengths']
                 fwhm = attributes['fwhm']
             else:
-                lt_pars = []
+                lt_pars = sorted((ds for ds in products if ds.startswith('rhot_')),
+                                  key=lambda ds: int(np.asarray(products[ds].attrs['band']).reshape(-1)[0]))
                 waves = []
                 fwhm = []
-                for ds in f['/products']:
-                    if ds.startswith('rhot_'):
-                        lt_pars.append(ds)
-                        att = {k: f['/products'][ds].attrs[k] for k in f['/products'][ds].attrs.keys() if k != 'DIMENSION_LIST'}
-                        waves.append(att['wavelength'][0])
-                        fwhm.append(att['fwhm'][0])
+                for ds in lt_pars:
+                    att = {k: products[ds].attrs[k] for k in products[ds].attrs.keys() if k != 'DIMENSION_LIST'}
+                    waves.append(att['wavelength'][0])
+                    fwhm.append(att['fwhm'][0])
 
         else:
             continue
@@ -135,8 +153,8 @@ def l1_convert(inputfile, output = None, settings = None):
 
 
         ## time
-        if 'unixtime' in f['/geometry/']:
-            utime = f['/geometry/']['unixtime'][:]
+        if 'unixtime' in geometry:
+            utime = geometry['unixtime'][:]
             start_time = datetime.datetime.utcfromtimestamp(utime[0])
             stop_time = datetime.datetime.utcfromtimestamp(utime[-1])
             dt = start_time + (stop_time-start_time)
@@ -144,8 +162,8 @@ def l1_convert(inputfile, output = None, settings = None):
             dt = dateutil.parser.parse(gatts['timestamp_acquired'].strip('Z')) ## timestamp format is wrong, has both +00:00 and Z
 
         ## read lat and lon
-        lat = f['/geometry/']['latitude'][:]
-        lon = f['/geometry/']['longitude'][:]
+        lat = geometry['latitude'][:]
+        lon = geometry['longitude'][:]
 
         sub = None
         if setu['limit'] is not None:
@@ -158,15 +176,15 @@ def l1_convert(inputfile, output = None, settings = None):
 
         ## geometry
         if sub is None:
-            vza = f['/geometry/']['sensor_zenith'][:]
-            vaa = f['/geometry/']['sensor_azimuth'][:]
-            sza = f['/geometry/']['solar_zenith'][:]
-            saa = f['/geometry/']['solar_azimuth'][:]
+            vza = geometry['sensor_zenith'][:]
+            vaa = geometry['sensor_azimuth'][:]
+            sza = geometry['solar_zenith'][:]
+            saa = geometry['solar_azimuth'][:]
         else:
-            vza = f['/geometry/']['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            vaa = f['/geometry/']['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            sza = f['/geometry/']['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
-            saa = f['/geometry/']['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vza = geometry['sensor_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            vaa = geometry['sensor_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            sza = geometry['solar_zenith'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+            saa = geometry['solar_azimuth'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
         ## compute relative azimuth angle
         raa = np.abs(saa-vaa)
@@ -261,18 +279,18 @@ def l1_convert(inputfile, output = None, settings = None):
         if processing_level == 'L1C':
             if (lt_pars == 'Lt') & (setu['hyper_read_cube']):
                 if sub is None:
-                    data = f['/products']['Lt'][:]
+                    data = products['Lt'][:]
                 else:
-                    data= f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
+                    data= products['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
                 nbands = data.shape[2]
                 data_dimensions = data.shape[0], data.shape[1]
 
         elif processing_level == 'L1D':
             if (lt_pars == 'rhot') & (setu['hyper_read_cube']):
                 if sub is None:
-                    data = f['/products']['rhot'][:]
+                    data = products['rhot'][:]
                 else:
-                    data= f['/products']['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
+                    data= products['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], :]
                 nbands = data.shape[2]
                 data_dimensions = data.shape[0], data.shape[1]
         else:
@@ -294,14 +312,14 @@ def l1_convert(inputfile, output = None, settings = None):
                         cdata_radiance = data[:,:,bi]
                     else:
                         if sub is None:
-                            cdata_radiance = f['/products']['Lt'][:, :, bi]
+                            cdata_radiance = products['Lt'][:, :, bi]
                         else:
-                            cdata_radiance = f['/products']['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
+                            cdata_radiance = products['Lt'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
                 else:
                     if sub is None:
-                        cdata_radiance = f['/products'][lt_pars[bi]][:]
+                        cdata_radiance = products[lt_pars[bi]][:]
                     else:
-                        cdata_radiance = f['/products'][lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+                        cdata_radiance = products[lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
                 if setu['output_lt']:
                     ## write toa radiance
@@ -322,14 +340,14 @@ def l1_convert(inputfile, output = None, settings = None):
                         cdata_reflectance = data[:,:,bi]
                     else:
                         if sub is None:
-                            cdata_reflectance = f['/products']['rhot'][:, :, bi]
+                            cdata_reflectance = products['rhot'][:, :, bi]
                         else:
-                            cdata_reflectance = f['/products']['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
+                            cdata_reflectance = products['rhot'][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2], bi]
                 else:
                     if sub is None:
-                        cdata_reflectance = f['/products'][lt_pars[bi]][:]
+                        cdata_reflectance = products[lt_pars[bi]][:]
                     else:
-                        cdata_reflectance = f['/products'][lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
+                        cdata_reflectance = products[lt_pars[bi]][sub[1]:sub[1]+sub[3],sub[0]:sub[0]+sub[2]]
 
                 ## compute reflectance
                 cdata = cdata_reflectance
